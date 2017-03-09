@@ -1,0 +1,78 @@
+plugins {
+    id 'java' // or 'groovy' Must be explicitly applied
+    id 'com.github.johnrengelman.shadow' version '1.2.3'
+    id 'application'
+}
+
+sourceCompatibility = 1.7
+mainClassName = "com.gcplot.connector.Bootstrap"
+
+jar {
+    manifest {
+        attributes("Implementation-Title": "GCPlot Connector",
+                   "Main-Class": "com.gcplot.connector.Bootstrap")
+    }
+}
+
+repositories {
+    jcenter()
+}
+
+shadowJar {
+    zip64 = true
+    archiveName = "bootstrap.jar"
+    mergeServiceFiles()
+}
+
+def releaseVersion = "0.0.1"
+
+dependencies {
+    compile 'org.slf4j:slf4j-api:1.7.21'
+    compile group: 'ch.qos.logback', name: 'logback-classic', version: '1.1.9'
+    compile group: 'ch.qos.logback', name: 'logback-core', version: '1.1.9'
+    compile group: 'com.google.guava', name: 'guava', version: '20.0'
+    compile group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.93'
+
+    compile group: 'com.beust', name: 'jcommander', version: '1.60'
+
+    testCompile 'junit:junit:4.12'
+}
+
+task tar(type: Tar) {
+    extension = 'tar.gz'
+    compression = Compression.GZIP
+    baseName = "jcst-" + releaseVersion
+
+    into("jcst-" + releaseVersion) {
+        from "${project.buildDir}/distr/"
+        fileMode = 0755
+    }
+}
+
+task distribute(dependsOn: 'shadowJar') {
+    doLast {
+        copy {
+            from "src/main/resources/gcpc"
+            into "${project.buildDir}/distr/bin"
+
+            filter {
+                String line -> line.replace("[[VERSION]]", releaseVersion)
+            }
+        }
+        copy {
+            from "src/main/resources/gcpc.bat"
+            into "${project.buildDir}/distr/bin"
+
+            filter {
+                String line -> line.replace("[[VERSION]]", releaseVersion)
+            }
+        }
+        copy {
+            from "${project.buildDir}/libs/bootstrap.jar"
+            into "${project.buildDir}/distr/lib"
+        }
+    }
+}
+
+distribute.mustRunAfter shadowJar
+tar.mustRunAfter distribute
