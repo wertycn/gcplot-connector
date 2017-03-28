@@ -31,7 +31,9 @@ dependencies {
     compile group: 'ch.qos.logback', name: 'logback-classic', version: '1.1.9'
     compile group: 'ch.qos.logback', name: 'logback-core', version: '1.1.9'
     compile group: 'com.google.guava', name: 'guava', version: '20.0'
-    compile group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.93'
+    compile group: 'com.amazonaws', name: 'aws-java-sdk-s3', version: '1.11.109'
+    compile group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.3'
+    compile group: 'net.openhft', name: 'chronicle-map', version: '2.4.17'
 
     compile group: 'com.beust', name: 'jcommander', version: '1.60'
 
@@ -41,9 +43,9 @@ dependencies {
 task tar(type: Tar) {
     extension = 'tar.gz'
     compression = Compression.GZIP
-    baseName = "jcst-" + releaseVersion
+    baseName = "gcpc-" + releaseVersion
 
-    into("jcst-" + releaseVersion) {
+    into("gcpc-" + releaseVersion) {
         from "${project.buildDir}/distr/"
         fileMode = 0755
     }
