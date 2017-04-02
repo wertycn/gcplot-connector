@@ -13,11 +13,12 @@ import java.util.List;
 public class S3ResourceManager {
     private static final Logger LOG = LoggerFactory.getLogger(S3ResourceManager.class);
     private S3Connector connector;
+    private String basePath;
 
     public void upload(File file, String newPath, String contentType) {
         List<PartETag> partETags = new ArrayList<>();
 
-        newPath = newPath + "/" + file.getName();
+        newPath = (basePath.length() > 0 ? basePath : "") + newPath + "/" + file.getName();
         // Step 1: Initialize.
         ObjectMetadata om = new ObjectMetadata();
         if (contentType == null) {
@@ -81,5 +82,12 @@ public class S3ResourceManager {
     }
     public void setConnector(S3Connector connector) {
         this.connector = connector;
+    }
+
+    public String getBasePath() {
+        return basePath;
+    }
+    public void setBasePath(String basePath) {
+        this.basePath = basePath;
     }
 }

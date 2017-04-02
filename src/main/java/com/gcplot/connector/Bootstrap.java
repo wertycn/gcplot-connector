@@ -19,6 +19,10 @@ import java.io.File;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author <a href="mailto:art.dm.ser@gmail.com">Artem Dmitriev</a>
@@ -43,11 +47,35 @@ public class Bootstrap {
     private String token;
     @Parameter(names = { "-https" }, description = "Whether to use secure connections.")
     private boolean isHttps = true;
+    @Parameter(names = { "-extension" }, description = "GC Log Files extention suffix (before .N number for rotating logs)")
+    private String extension = ".log";
+    @Parameter(names = { "-reaload_config_ms" }, description = "Config reload period in milliseconds.")
+    private long reloadConfigMs = 30000;
 
     private CloseableHttpClient httpclient = HttpClients.createDefault();
+    private ScheduledExecutorService configurationReloader = Executors.newSingleThreadScheduledExecutor();
+    private ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService uploadExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 4);
     private JsonNode analyze;
+    private volatile S3ResourceManager s3ResourceManager;
 
     public void run() throws Exception {
+        loadAnalyze();
+        configurationReloader.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                LOG.info("Reloading configuration.");
+                try {
+                    loadAnalyze();
+                } catch (Throwable t) {
+                    LOG.error(t.getMessage(), t);
+                }
+            }
+        }, reloadConfigMs, reloadConfigMs, TimeUnit.MILLISECONDS);
+
+    }
+
+    private void loadAnalyze() throws Exception {
         analyze = call(GET_ANALYZE, Collections.singletonMap("id", analyzeId));
         if (analyze.has("id")) {
             String sourceTypeStr = analyze.get("source_type").asText("");
@@ -65,7 +93,7 @@ public class Bootstrap {
                     } else if (sourceType == SourceType.GCS) {
                         LOG.error("Source Type {} is not supported by this version. Consider updating.");
                     } else {
-                        runUploader(sourceType,  props);
+                        reloadResourceManager(sourceType,  props);
                     }
                 }
             }
@@ -74,8 +102,41 @@ public class Bootstrap {
         }
     }
 
-    private void runUploader(SourceType sourceType, Properties props) {
+    private void reloadResourceManager(SourceType sourceType, Properties props) throws Exception {
+        String basePath;
+        S3Connector connector = new S3Connector();
+        if (sourceType == SourceType.INTERNAL) {
+            JsonNode internalSettings = call("/connector/internal/settings", Collections.<String, String>emptyMap());
+            connector.setBucket(internalSettings.get("s3_bucket").asText());
+            connector.setRegion(internalSettings.get("s3_region").asText());
+            connector.setAccessKey(internalSettings.get("s3_access_key").asText());
+            connector.setSecretKey(internalSettings.get("s3_secret_key").asText());
+            basePath = normPath(internalSettings.get("s3_base_path").asText());
+        } else if (sourceType == SourceType.S3) {
+            connector.setBucket(props.getProperty("s3.bucket", ""));
+            connector.setRegion(props.getProperty("s3.region.id", "us-east-1"));
+            connector.setAccessKey(props.getProperty("s3.access_key", ""));
+            connector.setSecretKey(props.getProperty("s3.secret_key", ""));
+            basePath = normPath(props.getProperty("s3.prefix", ""));
+        } else {
+            throw new RuntimeException("Unknown Source Type = " + sourceType);
+        }
+        S3ResourceManager resourceManager = new S3ResourceManager();
+        resourceManager.setConnector(connector);
+        resourceManager.setBasePath(basePath);
+        this.s3ResourceManager = resourceManager;
+    }
 
+    private String normPath(String basePath) {
+        if (!Strings.isNullOrEmpty(basePath)) {
+            if (!basePath.endsWith("/")) {
+                basePath += '/';
+            }
+            while (basePath.startsWith("/")) {
+                basePath = basePath.substring(1);
+            }
+        }
+        return Strings.nullToEmpty(basePath);
     }
 
     public JsonNode call(String path, Map<String, String> params) throws Exception {
