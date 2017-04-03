@@ -1,0 +1,47 @@
+#!/bin/bash
+
+DIR="$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PID_PATH_NAME=/tmp/gcpcn.pid
+
+
+if [ -z $JAVA_HOME ]; then
+  echo "Unable to locate Java installation! JAVA_HOME env variable is empty"
+  echo $USAGE_MSG
+  exit 0
+fi
+
+function stop_service() {
+  if [ -f $PID_PATH_NAME ]; then
+      PID=$(cat $PID_PATH_NAME);
+      echo "$SERVICE_NAME stoping ..."
+      echo "$SERVICE_NAME killing $PID ..."
+      kill $PID;
+      wait $PID;
+      echo "$SERVICE_NAME stopped ..."
+      rm -rf $PID_PATH_NAME
+      sleep 5
+  else
+      echo "$SERVICE_NAME is not running ..."
+  fi
+}
+
+case $1 in
+    start)
+        start_service
+    ;;
+    stop)
+        stop_service
+    ;;
+    restart)
+        stop_service
+        start_service
+    ;;
+    status)
+        if [ -f $PID_PATH_NAME ]; then
+          PID=$(cat $PID_PATH_NAME);
+          echo "Started $PID."
+        else
+          echo "Not started."
+        fi
+    ;;
+esac

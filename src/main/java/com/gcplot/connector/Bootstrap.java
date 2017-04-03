@@ -120,9 +120,19 @@ public class Bootstrap {
                             WatchEvent<Path> ev = (WatchEvent<Path>) event;
                             File f = ev.context().toFile();
 
-                            if (extensionMatches(f)) {
-                                syncFiles(f);
+                            try {
+                                if (extensionMatches(f)) {
+                                    syncFiles(f);
+                                }
+                            } catch (Throwable t) {
+                                LOG.error(t.getMessage(), t);
                             }
+                            // su - root -c "nohup sleep 30 2>> /dev/null >> /dev/null & echo \$! > /tmp/rrr.pid"
+                        }
+
+                        boolean valid = key.reset();
+                        if (!valid) {
+                            break;
                         }
                     }
                 } catch (Throwable t) {
