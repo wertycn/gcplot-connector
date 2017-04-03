@@ -12,20 +12,32 @@ import java.util.List;
 
 public class S3ResourceManager {
     private static final Logger LOG = LoggerFactory.getLogger(S3ResourceManager.class);
-    private S3Connector connector;
-    private String basePath;
+    private final S3Connector connector;
+    private final String basePath;
+    private final String accountId;
+    private final String analyzeId;
+    private final String jvmId;
 
-    public void upload(File file, String newPath, String contentType) {
+    public S3ResourceManager(S3Connector connector, String basePath, String accountId, String analyzeId,
+                             String jvmId) {
+        this.connector = connector;
+        this.basePath = basePath;
+        this.accountId = accountId;
+        this.analyzeId = analyzeId;
+        this.jvmId = jvmId;
+    }
+
+    public void upload(File file) {
         List<PartETag> partETags = new ArrayList<>();
 
+        String newPath = Utils.toBase64(accountId) + "/" + analyzeId + "/" + jvmId;
         newPath = (basePath.length() > 0 ? basePath : "") + newPath + "/" + file.getName();
         // Step 1: Initialize.
         ObjectMetadata om = new ObjectMetadata();
-        if (contentType == null) {
-            try {
-                contentType = Files.probeContentType(file.toPath());
-            } catch (IOException ignored) {
-            }
+        String contentType = null;
+        try {
+            contentType = Files.probeContentType(file.toPath());
+        } catch (IOException ignored) {
         }
         if (contentType != null) {
             om.addUserMetadata("Content-Type", contentType);
@@ -75,19 +87,5 @@ public class S3ResourceManager {
                         connector.getBucket(), newPath, initResponse.getUploadId()));
             }
         }
-    }
-
-    public S3Connector getConnector() {
-        return connector;
-    }
-    public void setConnector(S3Connector connector) {
-        this.connector = connector;
-    }
-
-    public String getBasePath() {
-        return basePath;
-    }
-    public void setBasePath(String basePath) {
-        this.basePath = basePath;
     }
 }

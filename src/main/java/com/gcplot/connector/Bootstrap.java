@@ -7,6 +7,8 @@ import com.beust.jcommander.ParameterException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Strings;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.io.FileUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
@@ -16,13 +18,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Properties;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPOutputStream;
+
+import static java.nio.file.StandardWatchEventKinds.OVERFLOW;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_DELETE;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
 
 /**
  * @author <a href="mailto:art.dm.ser@gmail.com">Artem Dmitriev</a>
@@ -32,6 +42,9 @@ public class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
     private static final ObjectMapper JSON_FACTORY = new ObjectMapper();
     private static final String GET_ANALYZE = "/analyse/get";
+    private static final String GET_ACCOUNT_ID = "/user/account/id";
+    private static final String RAW_DATA_DIR = "/raw-logs";
+    private static final String UPLOAD_DIR = "/upload";
 
     @Parameter(names = { "-logs_dir" }, required = true, validateValueWith = DirectoryValidator.class, description = "Directory where log files are located")
     private String logsDir;
@@ -51,31 +64,158 @@ public class Bootstrap {
     private String extension = ".log";
     @Parameter(names = { "-reaload_config_ms" }, description = "Config reload period in milliseconds.")
     private long reloadConfigMs = 30000;
+    @Parameter(names = { "-sync_files_ms" }, description = "Log files sync period in milliseconds.")
+    private long filesSyncMs = 5000;
 
     private CloseableHttpClient httpclient = HttpClients.createDefault();
     private ScheduledExecutorService configurationReloader = Executors.newSingleThreadScheduledExecutor();
-    private ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
+    private ScheduledExecutorService fileSyncExecutor = Executors.newSingleThreadScheduledExecutor();
+    private ScheduledExecutorService conductorExecutor = Executors.newSingleThreadScheduledExecutor();
+    private ExecutorService listenerExecutor = Executors.newSingleThreadExecutor();
     private ExecutorService uploadExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 4);
     private JsonNode analyze;
     private volatile S3ResourceManager s3ResourceManager;
 
     public void run() throws Exception {
+        if (!new File(dataDir + RAW_DATA_DIR).exists()) {
+            new File(dataDir + RAW_DATA_DIR).mkdir();
+        }
+        if (!new File(dataDir + UPLOAD_DIR).exists()) {
+            new File(dataDir + UPLOAD_DIR).mkdir();
+        }
         loadAnalyze();
         configurationReloader.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
-                LOG.info("Reloading configuration.");
+                LOG.info("Reloading configuration started.");
                 try {
                     loadAnalyze();
                 } catch (Throwable t) {
                     LOG.error(t.getMessage(), t);
+                } finally {
+                    LOG.info("Reloading configuration completed.");
                 }
             }
         }, reloadConfigMs, reloadConfigMs, TimeUnit.MILLISECONDS);
+        listenerExecutor.submit(new Runnable() {
+            @Override
+            public void run() {
+                LOG.info("Starting directory watcher daemon.");
+                try {
+                    WatchService watcher = FileSystems.getDefault().newWatchService();
+                    Path dir = Paths.get(logsDir);
+                    dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
 
+                    while (true) {
+                        WatchKey key = watcher.take();
+
+                        for (WatchEvent<?> event : key.pollEvents()) {
+                            WatchEvent.Kind<?> kind = event.kind();
+                            if (kind == OVERFLOW || kind == ENTRY_DELETE) {
+                                continue;
+                            }
+                            WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                            File f = ev.context().toFile();
+
+                            if (extensionMatches(f)) {
+                                syncFiles(f);
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    LOG.error(t.getMessage(), t);
+                } finally {
+                    LOG.info("Stopping directory watcher daemon.");
+                }
+            }
+        });
+        fileSyncExecutor.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    List<File> files =
+                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + RAW_DATA_DIR), null, false));
+                    for (File f : files) {
+                        try {
+                            String hex;
+                            try (FileInputStream fis = new FileInputStream(f)) {
+                                hex = DigestUtils.sha1Hex(fis);
+                            }
+                            String fileName = hex + ".log.gz";
+                            File target = new File(dataDir + UPLOAD_DIR, fileName);
+                            if (!target.exists()) {
+                                try (GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target))) {
+                                    FileUtils.copyFile(f, gos);
+                                }
+                            }
+                            FileUtils.deleteQuietly(f);
+                        } catch (Throwable t) {
+                            LOG.error(t.getMessage(), t);
+                        }
+                    }
+                } catch (Throwable t) {
+                    LOG.error(t.getMessage(), t);
+                }
+            }
+        }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
+        conductorExecutor.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    List<File> files =
+                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + RAW_DATA_DIR), null, false));
+                    for (final File f : files) {
+                        try {
+                            final File inProgress = new File(f.getParent(), f.getName() + ".progress");
+                            if (f.length() > 0 && !inProgress.exists()) {
+                                inProgress.createNewFile();
+
+                                uploadExecutor.submit(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        try {
+                                            s3ResourceManager.upload(f);
+                                            zero(f);
+                                            FileUtils.deleteQuietly(inProgress);
+                                        } catch (Throwable t) {
+                                            LOG.error(t.getMessage(), t);
+                                        }
+                                    }
+                                });
+                            }
+                        } catch (Throwable t) {
+                            LOG.error(t.getMessage(), t);
+                        }
+                    }
+                } catch (Throwable t) {
+                    LOG.error(t.getMessage(), t);
+                }
+            }
+        }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void syncFiles(File f) throws IOException {
+        for (File file : new ArrayList<>(FileUtils.listFiles(new File(logsDir), null, false))) {
+            if (!file.getName().equals(f.getName()) && extensionMatches(file)) {
+                String newName = UUID.randomUUID().toString() + ".log";
+                try {
+                    FileUtils.copyFile(file, new File(dataDir + RAW_DATA_DIR, newName));
+                } catch (Throwable t) {
+                    LOG.error(t.getMessage(), t);
+                    FileUtils.deleteQuietly(new File(dataDir + RAW_DATA_DIR, newName));
+                }
+            }
+        }
+    }
+
+    private boolean extensionMatches(File f) {
+        return f.getName().contains(extension) &&
+                (f.getName().endsWith(extension) || f.getName().endsWith(extension + ".current")
+                || f.getName().matches("^.*\\.\\d$"));
     }
 
     private void loadAnalyze() throws Exception {
+        String accountId = call(GET_ACCOUNT_ID, Collections.<String, String>emptyMap()).asText();
         analyze = call(GET_ANALYZE, Collections.singletonMap("id", analyzeId));
         if (analyze.has("id")) {
             String sourceTypeStr = analyze.get("source_type").asText("");
@@ -93,7 +233,7 @@ public class Bootstrap {
                     } else if (sourceType == SourceType.GCS) {
                         LOG.error("Source Type {} is not supported by this version. Consider updating.");
                     } else {
-                        reloadResourceManager(sourceType,  props);
+                        reloadResourceManager(accountId, sourceType, props);
                     }
                 }
             }
@@ -102,7 +242,7 @@ public class Bootstrap {
         }
     }
 
-    private void reloadResourceManager(SourceType sourceType, Properties props) throws Exception {
+    private void reloadResourceManager(String accountId, SourceType sourceType, Properties props) throws Exception {
         String basePath;
         S3Connector connector = new S3Connector();
         if (sourceType == SourceType.INTERNAL) {
@@ -121,10 +261,7 @@ public class Bootstrap {
         } else {
             throw new RuntimeException("Unknown Source Type = " + sourceType);
         }
-        S3ResourceManager resourceManager = new S3ResourceManager();
-        resourceManager.setConnector(connector);
-        resourceManager.setBasePath(basePath);
-        this.s3ResourceManager = resourceManager;
+        this.s3ResourceManager = new S3ResourceManager(connector, basePath, accountId, analyzeId, jvmId);
     }
 
     private String normPath(String basePath) {
@@ -150,7 +287,14 @@ public class Bootstrap {
         }
         HttpGet get = new HttpGet(builder.build());
         CloseableHttpResponse resp = httpclient.execute(get);
-        return JSON_FACTORY.readTree(resp.getEntity().getContent());
+        return JSON_FACTORY.readTree(resp.getEntity().getContent()).get("result");
+    }
+
+    private void zero(File file) {
+        try {
+            Files.newInputStream(file.toPath(), StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+        }
     }
 
     public static void main(String[] args) {
