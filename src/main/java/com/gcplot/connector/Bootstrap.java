@@ -66,11 +66,14 @@ public class Bootstrap {
     private long reloadConfigMs = 30000;
     @Parameter(names = { "-sync_files_ms" }, description = "Log files sync period in milliseconds.")
     private long filesSyncMs = 5000;
+    @Parameter(names = { "-ttl" })
+    private long ttl = TimeUnit.DAYS.toSeconds(1);
 
     private CloseableHttpClient httpclient = HttpClients.createDefault();
     private ScheduledExecutorService configurationReloader = Executors.newSingleThreadScheduledExecutor();
     private ScheduledExecutorService fileSyncExecutor = Executors.newSingleThreadScheduledExecutor();
     private ScheduledExecutorService conductorExecutor = Executors.newSingleThreadScheduledExecutor();
+    private ScheduledExecutorService ttlExecutor = Executors.newSingleThreadScheduledExecutor();
     private ExecutorService listenerExecutor = Executors.newSingleThreadExecutor();
     private ExecutorService uploadExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 4);
     private JsonNode analyze;
@@ -163,7 +166,7 @@ public class Bootstrap {
             public void run() {
                 try {
                     List<File> files =
-                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + RAW_DATA_DIR), null, false));
+                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
                     for (final File f : files) {
                         try {
                             final File inProgress = new File(f.getParent(), f.getName() + ".progress");
@@ -192,6 +195,25 @@ public class Bootstrap {
                 }
             }
         }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
+        ttlExecutor.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    List<File> files =
+                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
+                    for (File f : files) {
+                        if (f.length() == 0) {
+                            long lm = f.lastModified();
+                            if (lm > 0 && System.currentTimeMillis() - lm > ttl) {
+                                FileUtils.deleteQuietly(f);
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    LOG.error(t.getMessage(), t);
+                }
+            }
+        }, 30, 30, TimeUnit.MINUTES);
     }
 
     private void syncFiles(File f) throws IOException {
@@ -292,8 +314,8 @@ public class Bootstrap {
 
     private void zero(File file) {
         try {
-            Files.newInputStream(file.toPath(), StandardOpenOption.TRUNCATE_EXISTING);
-        } catch (IOException e) {
+            Files.newOutputStream(file.toPath(), StandardOpenOption.TRUNCATE_EXISTING).close();
+        } catch (IOException ignored) {
         }
     }
 
