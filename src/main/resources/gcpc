@@ -19,7 +19,7 @@ fi
 id -u $GCP_USER >/dev/null 2>&1;
 RES=$?
 
-if ["$RES" == "1"] then
+if [ "$RES" == "1" ]; then
   echo "User $GCP_USER not found!"
   exit 1
 fi
@@ -40,7 +40,7 @@ function start_service() {
   fi
 
   if [ ! -f $PID_PATH_NAME ]; then
-    su - $GCP_USER -c "nohup $JAVA_HOME/bin/java $JAVA_PROC_ARGS $PARAMS -Dlogback.configurationFile=$GCP_DIRECTORY/bin/logback.xml -jar $GCP_DIRECTORY/lib/bs.jar 2>> /dev/null >> /dev/null & echo \$! > $PID_PATH_NAME"
+    su - $GCP_USER -c "nohup $JAVA_HOME/bin/java $JAVA_PROC_ARGS $PARAMS -Dlogback.configurationFile=$GCP_DIRECTORY/bin/logback.xml -jar $GCP_DIRECTORY/lib/bs.jar >> /dev/null & echo \$! > $PID_PATH_NAME"
     sleep 5
     echo "gcpc service started."
   else
