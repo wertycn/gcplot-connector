@@ -1,0 +1,42 @@
+#!/bin/bash
+
+###################################
+#
+# WARNING! Values below should be OBLIGATORILY modified
+#
+###################################
+
+## Directory with the Garbage Collector log files
+export LOGS_DIR=
+
+## Account token value
+export ACCOUNT_TOKEN=
+
+## Analyze Group ID
+export ANALYZE_GROUP_ID=
+
+## JVM ID
+export JVM_ID=
+
+###################################
+
+USER=root
+
+JAVA_PROC_ARGS="-Xmx128m -Xms128m"
+
+# Connector working data directory
+export DATA_DIR=/var/lib/gcpc
+
+# GCPlot API Host
+export GCP_HOST=gs.gcplot.com
+
+# Whether to use HTTPS for connections
+export USE_HTTPS=true
+
+# GC Log Files extension suffix (before .N number for rotating logs),
+# often set with "-Xloggc" JVM flag
+export EXTENSION=.log
+
+export RELOAD_CONFIG_MS=30000
+export SYNC_FILES_MS=5000
+export TTL=86400

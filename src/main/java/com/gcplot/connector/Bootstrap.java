@@ -60,7 +60,7 @@ public class Bootstrap {
     private String token;
     @Parameter(names = { "-https" }, description = "Whether to use secure connections.")
     private boolean isHttps = true;
-    @Parameter(names = { "-extension" }, description = "GC Log Files extention suffix (before .N number for rotating logs)")
+    @Parameter(names = { "-extension" }, description = "GC Log Files extension suffix (before .N number for rotating logs)")
     private String extension = ".log";
     @Parameter(names = { "-reaload_config_ms" }, description = "Config reload period in milliseconds.")
     private long reloadConfigMs = 30000;
@@ -127,7 +127,6 @@ public class Bootstrap {
                             } catch (Throwable t) {
                                 LOG.error(t.getMessage(), t);
                             }
-                            // su - root -c "nohup sleep 30 2>> /dev/null >> /dev/null & echo \$! > /tmp/rrr.pid"
                         }
 
                         boolean valid = key.reset();
