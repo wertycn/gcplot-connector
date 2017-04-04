@@ -272,19 +272,15 @@ public class Bootstrap {
             if (Strings.isNullOrEmpty(sourceTypeStr)) {
                 LOG.error("Analyze Group - Source Type is empty.");
             } else {
-                SourceType sourceType = SourceType.by(sourceTypeStr);
-                if (sourceType == null) {
-                    LOG.error("Source Type {} is not supported by this version. Consider updating.");
-                } else {
-                    Properties props = Utils.fromString(analyze.get("source_config").asText(""));
+                SourceType sourceType = SourceType.valueOf(sourceTypeStr.toUpperCase());
+                Properties props = Utils.fromString(analyze.get("source_config").asText(""));
 
-                    if (sourceType == SourceType.NONE) {
-                        LOG.info("Analyze Group {} has none Source Type set. Exiting.");
-                    } else if (sourceType == SourceType.GCS) {
-                        LOG.error("Source Type {} is not supported by this version. Consider updating.");
-                    } else {
-                        reloadResourceManager(accountId, sourceType, props);
-                    }
+                if (sourceType == SourceType.NONE) {
+                    LOG.info("Analyze Group {} has none Source Type set. Exiting.", analyzeId);
+                } else if (sourceType == SourceType.GCS) {
+                    LOG.error("Source Type {} is not supported by this version. Consider updating.", sourceTypeStr);
+                } else {
+                    reloadResourceManager(accountId, sourceType, props);
                 }
             }
         } else {

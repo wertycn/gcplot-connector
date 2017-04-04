@@ -37,10 +37,11 @@ function start_service() {
 
   if $DEBUG ; then
     echo $PARAMS
+    echo "$JAVA_HOME/bin/java $JAVA_PROC_ARGS -Dlogback.configurationFile=$GCP_DIRECTORY/bin/logback.xml -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS"
   fi
 
   if [ ! -f $PID_PATH_NAME ]; then
-    su - $GCP_USER -c "nohup $JAVA_HOME/bin/java $JAVA_PROC_ARGS $PARAMS -Dlogback.configurationFile=$GCP_DIRECTORY/bin/logback.xml -jar $GCP_DIRECTORY/lib/bs.jar >> /dev/null & echo \$! > $PID_PATH_NAME"
+    su - $GCP_USER -c "nohup $JAVA_HOME/bin/java $JAVA_PROC_ARGS -Dlogback.configurationFile=$GCP_DIRECTORY/bin/logback.xml -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS >> /dev/null & echo \$! > $PID_PATH_NAME"
     sleep 5
     echo "gcpc service started."
   else
