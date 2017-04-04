@@ -33,7 +33,11 @@ fi
 
 function start_service() {
   echo "Starting gcpc service ..."
-  PARAMS="-logs_dir $LOGS_DIR -gcp_host $GCP_HOST -data_dir $DATA_DIR -analyze_group $ANALYZE_GROUP_ID -jvm_id $JVM_ID -token $ACCOUNT_TOKEN -https $USE_HTTPS -extension $EXTENSION -reaload_config_ms $RELOAD_CONFIG_MS -sync_files_ms $SYNC_FILES_MS -ttl $TTL"
+  PARAMS="-logs_dir $LOGS_DIR -gcp_host $GCP_HOST -data_dir $DATA_DIR -analyze_group $ANALYZE_GROUP_ID -jvm_id $JVM_ID -token $ACCOUNT_TOKEN -extension $EXTENSION -reaload_config_ms $RELOAD_CONFIG_MS -sync_files_ms $SYNC_FILES_MS -ttl $TTL"
+
+  if $USE_HTTPS ; then
+    PARAMS="$PARAMS -https"
+  fi
 
   if $DEBUG ; then
     echo $PARAMS
