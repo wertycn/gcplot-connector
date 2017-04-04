@@ -307,6 +307,7 @@ public class Bootstrap {
         } else {
             throw new RuntimeException("Unknown Source Type = " + sourceType);
         }
+        connector.init();
         this.s3ResourceManager = new S3ResourceManager(connector, basePath, accountId, analyzeId, jvmId);
     }
 

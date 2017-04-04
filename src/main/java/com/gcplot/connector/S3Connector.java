@@ -22,7 +22,7 @@ public class S3Connector {
     private String endpoint;
     private AmazonS3 client;
 
-    public void init(boolean connect) {
+    public void init() {
         AWSCredentials credentials;
         if (!Strings.isNullOrEmpty(accessKey) || !Strings.isNullOrEmpty(secretKey)) {
             credentials = new BasicAWSCredentials(accessKey, secretKey);
