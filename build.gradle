@@ -20,7 +20,7 @@ repositories {
 
 shadowJar {
     zip64 = true
-    archiveName = "bootstrap.jar"
+    archiveName = "bs.jar"
     mergeServiceFiles()
 }
 
@@ -63,6 +63,14 @@ task distribute(dependsOn: 'shadowJar') {
             }
         }
         copy {
+            from "src/main/resources/settings"
+            into "${project.buildDir}/distr/bin"
+        }
+        copy {
+            from "src/main/resources/logback.xml"
+            into "${project.buildDir}/distr/bin"
+        }
+        copy {
             from "src/main/resources/gcpc.bat"
             into "${project.buildDir}/distr/bin"
 
@@ -71,7 +79,7 @@ task distribute(dependsOn: 'shadowJar') {
             }
         }
         copy {
-            from "${project.buildDir}/libs/bootstrap.jar"
+            from "${project.buildDir}/libs/bs.jar"
             into "${project.buildDir}/distr/lib"
         }
     }
