@@ -107,6 +107,7 @@ public class Bootstrap {
                 try {
                     WatchService watcher = FileSystems.getDefault().newWatchService();
                     Path dir = Paths.get(logsDir);
+                    LOG.debug("Registering watcher on {}", dir);
                     dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
 
                     while (true) {
@@ -119,10 +120,13 @@ public class Bootstrap {
                             }
                             WatchEvent<Path> ev = (WatchEvent<Path>) event;
                             File f = ev.context().toFile();
+                            LOG.debug("Directory Watcher: Received notify about '{}' with kind {}", f.getName(), kind.name());
 
                             try {
                                 if (extensionMatches(f)) {
                                     syncFiles(f);
+                                } else {
+                                    LOG.debug("Directory Watcher: Extension doesn't match for {}", f.getName());
                                 }
                             } catch (Throwable t) {
                                 LOG.error(t.getMessage(), t);
@@ -145,6 +149,7 @@ public class Bootstrap {
             @Override
             public void run() {
                 try {
+                    LOG.debug("File Sync started.");
                     List<File> files =
                             new ArrayList<>(FileUtils.listFiles(new File(dataDir + RAW_DATA_DIR), null, false));
                     for (File f : files) {
@@ -156,6 +161,7 @@ public class Bootstrap {
                             String fileName = hex + ".log.gz";
                             File target = new File(dataDir + UPLOAD_DIR, fileName);
                             if (!target.exists()) {
+                                LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
                                 try (GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target))) {
                                     FileUtils.copyFile(f, gos);
                                 }
@@ -167,16 +173,20 @@ public class Bootstrap {
                     }
                 } catch (Throwable t) {
                     LOG.error(t.getMessage(), t);
+                } finally {
+                    LOG.debug("File sync finished.");
                 }
             }
         }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
         conductorExecutor.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
+                LOG.debug("Conductor process started.");
                 try {
                     List<File> files =
                             new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
                     for (final File f : files) {
+                        LOG.debug("Conductor: Checking {}", f.getName());
                         try {
                             final File inProgress = new File(f.getParent(), f.getName() + ".progress");
                             if (f.length() > 0 && !inProgress.exists()) {
@@ -186,6 +196,7 @@ public class Bootstrap {
                                     @Override
                                     public void run() {
                                         try {
+                                            LOG.debug("Uploading {}", f.getName());
                                             s3ResourceManager.upload(f);
                                             zero(f);
                                             FileUtils.deleteQuietly(inProgress);
@@ -201,6 +212,8 @@ public class Bootstrap {
                     }
                 } catch (Throwable t) {
                     LOG.error(t.getMessage(), t);
+                } finally {
+                    LOG.debug("Conductor process finished.");
                 }
             }
         }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
@@ -208,6 +221,7 @@ public class Bootstrap {
             @Override
             public void run() {
                 try {
+                    LOG.debug("TTL process started.");
                     List<File> files =
                             new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
                     for (File f : files) {
@@ -220,6 +234,8 @@ public class Bootstrap {
                     }
                 } catch (Throwable t) {
                     LOG.error(t.getMessage(), t);
+                } finally {
+                    LOG.debug("TTL process finished.");
                 }
             }
         }, 30, 30, TimeUnit.MINUTES);
@@ -229,6 +245,7 @@ public class Bootstrap {
         for (File file : new ArrayList<>(FileUtils.listFiles(new File(logsDir), null, false))) {
             if (!file.getName().equals(f.getName()) && extensionMatches(file)) {
                 String newName = UUID.randomUUID().toString() + ".log";
+                LOG.debug("Syncing {} to {}", file, newName);
                 try {
                     FileUtils.copyFile(file, new File(dataDir + RAW_DATA_DIR, newName));
                 } catch (Throwable t) {
@@ -248,6 +265,8 @@ public class Bootstrap {
     private void loadAnalyze() throws Exception {
         String accountId = call(GET_ACCOUNT_ID, Collections.<String, String>emptyMap()).asText();
         analyze = call(GET_ANALYZE, Collections.singletonMap("id", analyzeId));
+        LOG.debug("Account - {}", accountId);
+        LOG.debug("Analyze - {}", analyze);
         if (analyze.has("id")) {
             String sourceTypeStr = analyze.get("source_type").asText("");
             if (Strings.isNullOrEmpty(sourceTypeStr)) {
@@ -317,12 +336,14 @@ public class Bootstrap {
             builder.addParameter(i.getKey(), i.getValue());
         }
         HttpGet get = new HttpGet(builder.build());
+        LOG.debug("Calling {}", get);
         CloseableHttpResponse resp = httpclient.execute(get);
         return JSON_FACTORY.readTree(resp.getEntity().getContent()).get("result");
     }
 
     private void zero(File file) {
         try {
+            LOG.debug("Zeroing {}", file.getName());
             Files.newOutputStream(file.toPath(), StandardOpenOption.TRUNCATE_EXISTING).close();
         } catch (IOException ignored) {
         }
