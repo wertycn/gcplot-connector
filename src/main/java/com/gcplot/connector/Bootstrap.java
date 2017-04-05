@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 import static java.nio.file.StandardWatchEventKinds.OVERFLOW;
@@ -247,7 +248,14 @@ public class Bootstrap {
                 String newName = UUID.randomUUID().toString() + ".log";
                 LOG.debug("Syncing {} to {}", file, newName);
                 try {
-                    FileUtils.copyFile(file, new File(dataDir + RAW_DATA_DIR, newName));
+                    File target = new File(dataDir + RAW_DATA_DIR, newName);
+                    if (!isGzipped(file)) {
+                        FileUtils.copyFile(file, target);
+                    } else {
+                        try (GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(file))) {
+                            FileUtils.copyInputStreamToFile(gzip, target);
+                        }
+                    }
                 } catch (Throwable t) {
                     LOG.error(t.getMessage(), t);
                     FileUtils.deleteQuietly(new File(dataDir + RAW_DATA_DIR, newName));
@@ -258,8 +266,14 @@ public class Bootstrap {
 
     private boolean extensionMatches(File f) {
         return f.getName().contains(extension) &&
-                (f.getName().endsWith(extension) || f.getName().endsWith(extension + ".current")
-                || f.getName().matches("^.*\\.\\d$"));
+                (f.getName().endsWith(extension)
+                        || f.getName().endsWith(extension + ".gz")
+                        || f.getName().matches("^.*\\.\\d(\\.gz)?$"));
+    }
+
+
+    private boolean isGzipped(File f) {
+        return f.getName().endsWith(".gz");
     }
 
     private void loadAnalyze() throws Exception {

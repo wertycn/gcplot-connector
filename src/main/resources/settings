@@ -25,6 +25,9 @@ JAVA_PROC_ARGS="-Xmx128m -Xms128m"
 # Connector working data directory
 export DATA_DIR=/var/lib/gcpc
 
+# GCPC Application logs location
+export GCP_APP_LOG_DIR=/var/log/gcpc
+
 # GCPlot API Host
 export GCP_HOST=gs.gcplot.com
 
