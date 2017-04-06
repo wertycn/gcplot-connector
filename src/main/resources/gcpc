@@ -21,7 +21,7 @@ if [ "$RES" == "1" ]; then
 fi
 
 echo "Setting environment variables"
-. "GCP_CONFIG"
+. "$GCP_CONFIG"
 
 if [ -z $JAVA_HOME ]; then
   if [ -n `which java` ]; then
