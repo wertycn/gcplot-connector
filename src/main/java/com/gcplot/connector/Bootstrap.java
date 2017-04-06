@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Strings;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
@@ -30,10 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
-import static java.nio.file.StandardWatchEventKinds.OVERFLOW;
-import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE;
-import static java.nio.file.StandardWatchEventKinds.ENTRY_DELETE;
-import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
+import static java.nio.file.StandardWatchEventKinds.*;
 
 /**
  * @author <a href="mailto:art.dm.ser@gmail.com">Artem Dmitriev</a>
@@ -44,7 +42,6 @@ public class Bootstrap {
     private static final ObjectMapper JSON_FACTORY = new ObjectMapper();
     private static final String GET_ANALYZE = "/analyse/get";
     private static final String GET_ACCOUNT_ID = "/user/account/id";
-    private static final String RAW_DATA_DIR = "/raw-logs";
     private static final String UPLOAD_DIR = "/upload";
 
     @Parameter(names = { "-logs_dir" }, required = true, validateValueWith = DirectoryValidator.class, description = "Directory where log files are located")
@@ -74,7 +71,6 @@ public class Bootstrap {
 
     private CloseableHttpClient httpclient = HttpClients.createDefault();
     private ScheduledExecutorService configurationReloader = Executors.newSingleThreadScheduledExecutor();
-    private ScheduledExecutorService fileSyncExecutor = Executors.newSingleThreadScheduledExecutor();
     private ScheduledExecutorService conductorExecutor = Executors.newSingleThreadScheduledExecutor();
     private ScheduledExecutorService ttlExecutor = Executors.newSingleThreadScheduledExecutor();
     private ExecutorService listenerExecutor = Executors.newSingleThreadExecutor();
@@ -89,9 +85,6 @@ public class Bootstrap {
                 LOG.warn("Latest GCPC version is {}, while you have {}. Please consider updating.", version, this.version);
             }
         } catch (Throwable ignored) {}
-        if (!new File(dataDir + RAW_DATA_DIR).exists()) {
-            new File(dataDir + RAW_DATA_DIR).mkdir();
-        }
         if (!new File(dataDir + UPLOAD_DIR).exists()) {
             new File(dataDir + UPLOAD_DIR).mkdir();
         }
@@ -153,39 +146,6 @@ public class Bootstrap {
                 }
             }
         });
-        fileSyncExecutor.scheduleAtFixedRate(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    LOG.debug("File Sync started.");
-                    List<File> files =
-                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + RAW_DATA_DIR), null, false));
-                    for (File f : files) {
-                        try {
-                            String hex;
-                            try (FileInputStream fis = new FileInputStream(f)) {
-                                hex = DigestUtils.sha1Hex(fis);
-                            }
-                            String fileName = hex + ".log.gz";
-                            File target = new File(dataDir + UPLOAD_DIR, fileName);
-                            if (!target.exists()) {
-                                LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
-                                try (GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target))) {
-                                    FileUtils.copyFile(f, gos);
-                                }
-                            }
-                            FileUtils.deleteQuietly(f);
-                        } catch (Throwable t) {
-                            LOG.error(t.getMessage(), t);
-                        }
-                    }
-                } catch (Throwable t) {
-                    LOG.error(t.getMessage(), t);
-                } finally {
-                    LOG.debug("File sync finished.");
-                }
-            }
-        }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
         conductorExecutor.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
@@ -207,9 +167,15 @@ public class Bootstrap {
                                     @Override
                                     public void run() {
                                         try {
-                                            LOG.debug("Uploading {}", f.getName());
-                                            s3ResourceManager.upload(f);
-                                            zero(f);
+                                            S3ResourceManager rm = s3ResourceManager;
+                                            if (rm != null) {
+                                                LOG.debug("Uploading {}", f.getName());
+                                                rm.upload(f);
+                                                zero(f);
+                                            } else {
+                                                LOG.debug("Not uploading {}", f.getName());
+                                                zero(f);
+                                            }
                                             FileUtils.deleteQuietly(inProgress);
                                         } catch (Throwable t) {
                                             LOG.error(t.getMessage(), t);
@@ -253,24 +219,42 @@ public class Bootstrap {
         }, 30, 30, TimeUnit.MINUTES);
     }
 
+    private void checkAndScheduleForUpload(File f) {
+        try {
+            String hex;
+            try (FileInputStream fis = new FileInputStream(f)) {
+                if (isGzipped(f)) {
+                    hex = DigestUtils.sha1Hex(new GZIPInputStream(fis));
+                } else {
+                    hex = DigestUtils.sha1Hex(fis);
+                }
+            }
+            String fileName = hex + ".log.gz";
+            File target = new File(dataDir + UPLOAD_DIR, fileName);
+            if (!target.exists()) {
+                LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
+                try (GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target))) {
+                    if (isGzipped(f)) {
+                        try (GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(f))) {
+                            IOUtils.copy(gzip, gos);
+                        }
+                    } else {
+                        FileUtils.copyFile(f, gos);
+                    }
+                }
+            } else {
+                LOG.debug("File Sync: {} already exists.", fileName);
+            }
+        } catch (Throwable t) {
+            LOG.error(t.getMessage(), t);
+        }
+    }
+
     private void syncFiles(File f) throws IOException {
         for (File file : new ArrayList<>(FileUtils.listFiles(new File(logsDir), null, false))) {
             if (!file.getName().equals(f.getName()) && extensionMatches(file)) {
-                String newName = UUID.randomUUID().toString() + ".log";
-                LOG.debug("Syncing {} to {}", file, newName);
-                try {
-                    File target = new File(dataDir + RAW_DATA_DIR, newName);
-                    if (!isGzipped(file)) {
-                        FileUtils.copyFile(file, target);
-                    } else {
-                        try (GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(file))) {
-                            FileUtils.copyInputStreamToFile(gzip, target);
-                        }
-                    }
-                } catch (Throwable t) {
-                    LOG.error(t.getMessage(), t);
-                    FileUtils.deleteQuietly(new File(dataDir + RAW_DATA_DIR, newName));
-                }
+                LOG.debug("Checking {} for possible sync.", file.getName());
+                checkAndScheduleForUpload(file);
             }
         }
     }
@@ -301,9 +285,11 @@ public class Bootstrap {
                 Properties props = Utils.fromString(analyze.get("source_config").asText(""));
 
                 if (sourceType == SourceType.NONE) {
-                    LOG.info("Analyze Group {} has none Source Type set. Exiting.", analyzeId);
+                    LOG.info("Analyze Group {} has none Source Type set.", analyzeId);
+                    s3ResourceManager = null;
                 } else if (sourceType == SourceType.GCS) {
                     LOG.error("Source Type {} is not supported by this version. Consider updating.", sourceTypeStr);
+                    s3ResourceManager = null;
                 } else {
                     reloadResourceManager(accountId, sourceType, props);
                 }

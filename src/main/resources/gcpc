@@ -7,18 +7,9 @@ LOGBACK_PATH_NAME=/tmp/gcpc-logback.xml
 ##################################
 GCP_DIRECTORY=$PARENT_DIR
 GCP_CONFIG=$GCP_DIRECTORY/bin/settings
-GCP_USER=gcpc
 ##################################
 VERSION="[[VERSION]]"
 DEBUG=false
-
-id -u $GCP_USER >/dev/null 2>&1;
-RES=$?
-
-if [ "$RES" == "1" ]; then
-  echo "User $GCP_USER not found!"
-  exit 1
-fi
 
 echo "Setting environment variables"
 . "$GCP_CONFIG"
@@ -36,13 +27,13 @@ else
 fi
 
 if [ ! -d $DATA_DIR ]; then
-  su - $GCP_USER -c "mkdir -p $DATA_DIR"
+  mkdir -p $DATA_DIR
 fi
 
 # Copying logback to temp directory and set path inside it
-su - $GCP_USER -c "cp $GCP_DIRECTORY/bin/logback.xml $LOGBACK_PATH_NAME"
+cp $GCP_DIRECTORY/bin/logback.xml $LOGBACK_PATH_NAME
 GCP_APP_LOG_DIR_ESC=$(echo $GCP_APP_LOG_DIR | sed 's_/_\\/_g')
-su - $GCP_USER -c "sed 's/__LOG_PATH__/$GCP_APP_LOG_DIR_ESC/g' $GCP_DIRECTORY/bin/logback.xml > $LOGBACK_PATH_NAME"
+sed "s/__LOG_PATH__/$GCP_APP_LOG_DIR_ESC/g" $GCP_DIRECTORY/bin/logback.xml > $LOGBACK_PATH_NAME
 
 function start_service() {
   echo "Starting gcpc service ..."
@@ -58,7 +49,7 @@ function start_service() {
   fi
 
   if [ ! -f $PID_PATH_NAME ]; then
-    su - $GCP_USER -c "nohup $JAVA_CMD $JAVA_PROC_ARGS -Dlogback.configurationFile=$LOGBACK_PATH_NAME -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS >> /dev/null & echo \$! > $PID_PATH_NAME"
+    nohup $JAVA_CMD $JAVA_PROC_ARGS -Dlogback.configurationFile=$LOGBACK_PATH_NAME -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS >> /dev/null & echo $! > $PID_PATH_NAME
     sleep 5
     echo "gcpc service started."
   else
@@ -68,12 +59,12 @@ function start_service() {
 
 function stop_service() {
   if [ -f $PID_PATH_NAME ]; then
-      PID=$(su - $GCP_USER -c "cat $PID_PATH_NAME");
-      echo "$SERVICE_NAME stoping ..."
+      PID=$(cat $PID_PATH_NAME);
+      echo "$SERVICE_NAME stopping ..."
       echo "$SERVICE_NAME killing $PID ..."
-      su - $GCP_USER -c "kill $PID"
+      kill $PID
       echo "$SERVICE_NAME stopped ..."
-      su - $GCP_USER -c "rm -rf $PID_PATH_NAME"
+      rm -rf $PID_PATH_NAME
       sleep 5
   else
       echo "$SERVICE_NAME is not running ..."

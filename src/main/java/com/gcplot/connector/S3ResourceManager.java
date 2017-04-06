@@ -46,6 +46,7 @@ public class S3ResourceManager {
         InitiateMultipartUploadResult initResponse = null;
 
         try {
+            LOG.debug("S3: Uploading to {}", newPath);
             initRequest = new InitiateMultipartUploadRequest(connector.getBucket(), newPath, om);
             initResponse = connector.getClient().initiateMultipartUpload(initRequest);
 
