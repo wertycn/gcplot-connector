@@ -7,6 +7,7 @@ LOGBACK_PATH_NAME=/tmp/gcpc-logback.xml
 ##################################
 GCP_DIRECTORY=$PARENT_DIR
 GCP_CONFIG=$GCP_DIRECTORY/bin/settings
+GCP_USER=gcpc
 ##################################
 VERSION="[[VERSION]]"
 DEBUG=false
@@ -27,13 +28,13 @@ else
 fi
 
 if [ ! -d $DATA_DIR ]; then
-  mkdir -p $DATA_DIR
+  su $GCP_USER -c "mkdir -p $DATA_DIR"
 fi
 
 # Copying logback to temp directory and set path inside it
-cp $GCP_DIRECTORY/bin/logback.xml $LOGBACK_PATH_NAME
+su $GCP_USER -c "cp $GCP_DIRECTORY/bin/logback.xml $LOGBACK_PATH_NAME"
 GCP_APP_LOG_DIR_ESC=$(echo $GCP_APP_LOG_DIR | sed 's_/_\\/_g')
-sed "s/__LOG_PATH__/$GCP_APP_LOG_DIR_ESC/g" $GCP_DIRECTORY/bin/logback.xml > $LOGBACK_PATH_NAME
+su $GCP_USER -c "sed \"s/__LOG_PATH__/$GCP_APP_LOG_DIR_ESC/g\" $GCP_DIRECTORY/bin/logback.xml > $LOGBACK_PATH_NAME"
 
 function start_service() {
   echo "Starting gcpc service ..."
@@ -49,7 +50,7 @@ function start_service() {
   fi
 
   if [ ! -f $PID_PATH_NAME ]; then
-    nohup $JAVA_CMD $JAVA_PROC_ARGS -Dlogback.configurationFile=$LOGBACK_PATH_NAME -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS >> /dev/null & echo $! > $PID_PATH_NAME
+    su $GCP_USER -c "nohup $JAVA_CMD $JAVA_PROC_ARGS -Dlogback.configurationFile=$LOGBACK_PATH_NAME -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS >> /dev/null & echo \$! > $PID_PATH_NAME"
     sleep 5
     echo "gcpc service started."
   else
@@ -58,17 +59,7 @@ function start_service() {
 }
 
 function stop_service() {
-  if [ -f $PID_PATH_NAME ]; then
-      PID=$(cat $PID_PATH_NAME);
-      echo "$SERVICE_NAME stopping ..."
-      echo "$SERVICE_NAME killing $PID ..."
-      kill $PID
-      echo "$SERVICE_NAME stopped ..."
-      rm -rf $PID_PATH_NAME
-      sleep 5
-  else
-      echo "$SERVICE_NAME is not running ..."
-  fi
+  su $GCP_USER -c "if [ -f $PID_PATH_NAME ]; then echo \"$SERVICE_NAME killing ...\"; kill `cat $PID_PATH_NAME`; echo \"$SERVICE_NAME stopped ...\"; rm -rf $PID_PATH_NAME; else echo \"$SERVICE_NAME is not running ...\"; fi"
 }
 
 case $1 in
@@ -87,7 +78,7 @@ case $1 in
     ;;
     status)
         if [ -f $PID_PATH_NAME ]; then
-          PID=$(su - $GCP_USER -c "cat $PID_PATH_NAME");
+          PID=$(su $GCP_USER -c "cat $PID_PATH_NAME");
           echo "Started $PID."
         else
           echo "Not started."
