@@ -20,7 +20,10 @@ export JVM_ID=
 
 ###################################
 
-JAVA_PROC_ARGS="-Xmx128m -Xms128m"
+# Uncomment next line if you want to explicitly define Java home dir
+#export JAVA_HOME=/path/to/java/home
+
+export JAVA_PROC_ARGS="-Xmx128m -Xms128m"
 
 # Connector working data directory
 export DATA_DIR=/var/lib/gcpc
