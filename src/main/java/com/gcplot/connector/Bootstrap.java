@@ -236,9 +236,10 @@ public class Bootstrap {
                     List<File> files =
                             new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
                     for (File f : files) {
-                        if (f.length() == 0) {
+                        if (f.length() == 0 && !f.getName().endsWith(".progress")) {
                             long lm = f.lastModified();
                             if (lm > 0 && System.currentTimeMillis() - lm > ttl) {
+                                LOG.debug("TTL: deleting {}", f);
                                 FileUtils.deleteQuietly(f);
                             }
                         }
