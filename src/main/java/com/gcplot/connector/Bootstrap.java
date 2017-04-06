@@ -69,6 +69,8 @@ public class Bootstrap {
     private long filesSyncMs = 5000;
     @Parameter(names = { "-ttl" })
     private long ttl = TimeUnit.DAYS.toSeconds(1);
+    @Parameter(names = { "-version" }, required = true)
+    private String version;
 
     private CloseableHttpClient httpclient = HttpClients.createDefault();
     private ScheduledExecutorService configurationReloader = Executors.newSingleThreadScheduledExecutor();
@@ -81,6 +83,12 @@ public class Bootstrap {
     private volatile S3ResourceManager s3ResourceManager;
 
     public void run() throws Exception {
+        try {
+            String version = call("/connector/version/latest").get("result").asText("");
+            if (!version.equals(this.version)) {
+                LOG.warn("Latest GCPC version is {}, while you have {}. Please consider updating.", version, this.version);
+            }
+        } catch (Throwable ignored) {}
         if (!new File(dataDir + RAW_DATA_DIR).exists()) {
             new File(dataDir + RAW_DATA_DIR).mkdir();
         }
@@ -337,6 +345,10 @@ public class Bootstrap {
         return Strings.nullToEmpty(basePath);
     }
 
+    public JsonNode call(String path) throws Exception {
+        return call(path, Collections.<String, String>emptyMap());
+    }
+
     public JsonNode call(String path, Map<String, String> params) throws Exception {
         URIBuilder builder = new URIBuilder()
                 .setScheme(isHttps ? "https" : "http")
@@ -363,6 +375,9 @@ public class Bootstrap {
     public static void main(String[] args) {
         try {
             LOG.info("Starting GCPlot connector.");
+            LOG.info("Using Java Version {} by {}, {} {} {}", System.getProperty("java.version"),
+                    System.getProperty("java.vendor"), System.getProperty("os.arch"),
+                    System.getProperty("os.name"), System.getProperty("os.version"));
 
             Bootstrap bootstrap = new Bootstrap();
             new JCommander(bootstrap, args);
