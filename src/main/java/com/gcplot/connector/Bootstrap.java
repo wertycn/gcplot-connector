@@ -68,7 +68,7 @@ public class Bootstrap {
     @Parameter(names = { "-sync_files_ms" }, description = "Log files sync period in milliseconds.")
     private long filesSyncMs = 5000;
     @Parameter(names = { "-ttl" })
-    private long ttl = TimeUnit.DAYS.toSeconds(1);
+    private long ttl = TimeUnit.DAYS.toSeconds(14);
     @Parameter(names = { "-version" }, required = true)
     private String version;
 
@@ -132,11 +132,10 @@ public class Bootstrap {
                             LOG.debug("Directory Watcher: Received notify about '{}' with kind {}", f.getName(), kind.name());
 
                             try {
-                                if (extensionMatches(f)) {
-                                    syncFiles(f);
-                                } else {
+                                if (!extensionMatches(f)) {
                                     LOG.debug("Directory Watcher: Extension doesn't match for {}", f.getName());
                                 }
+                                syncFiles(f);
                             } catch (Throwable t) {
                                 LOG.error(t.getMessage(), t);
                             }
