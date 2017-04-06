@@ -196,6 +196,9 @@ public class Bootstrap {
                     for (final File f : files) {
                         LOG.debug("Conductor: Checking {}", f.getName());
                         try {
+                            if (f.getName().endsWith(".progress")) {
+                                continue;
+                            }
                             final File inProgress = new File(f.getParent(), f.getName() + ".progress");
                             if (f.length() > 0 && !inProgress.exists()) {
                                 inProgress.createNewFile();
