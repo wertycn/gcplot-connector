@@ -37,7 +37,7 @@ import static java.nio.file.StandardWatchEventKinds.*;
 public class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
     private static final ObjectMapper JSON_FACTORY = new ObjectMapper();
-    private static final String ROLL_LOG_EXTENSION_PATTERN = "^.*\\.\\d(\\.gz)?$";
+    private static final String ROLL_LOG_EXTENSION_PATTERN = "^.*\\.\\d+(\\.gz)?$";
     private static final String TIMESTAMP_PATTERN = "^( |\\t)*(\\d+\\.\\d+)\\:( |\\t)*";
     private static final int TIMESTAMP_FIND_LIMIT = 100;
     private static final String GET_ANALYZE = "/analyse/get";
