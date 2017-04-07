@@ -43,4 +43,4 @@ export EXTENSION=.log
 
 export RELOAD_CONFIG_MS=30000
 export SYNC_FILES_MS=5000
-export TTL=1209600
+export TTL=86400000

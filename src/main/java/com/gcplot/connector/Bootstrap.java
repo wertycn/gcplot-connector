@@ -65,7 +65,7 @@ public class Bootstrap {
     @Parameter(names = { "-sync_files_ms" }, description = "Log files sync period in milliseconds.")
     private long filesSyncMs = 5000;
     @Parameter(names = { "-ttl" })
-    private long ttl = TimeUnit.DAYS.toSeconds(14);
+    private long ttl = TimeUnit.DAYS.toMillis(14);
     @Parameter(names = { "-version" }, required = true)
     private String version;
 
