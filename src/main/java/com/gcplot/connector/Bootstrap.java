@@ -18,10 +18,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +37,9 @@ import static java.nio.file.StandardWatchEventKinds.*;
 public class Bootstrap {
     private static final Logger LOG = LoggerFactory.getLogger(Bootstrap.class);
     private static final ObjectMapper JSON_FACTORY = new ObjectMapper();
+    private static final String ROLL_LOG_EXTENSION_PATTERN = "^.*\\.\\d(\\.gz)?$";
+    private static final String TIMESTAMP_PATTERN = "^( |\\t)*(\\d+\\.\\d+)\\:( |\\t)*";
+    private static final int TIMESTAMP_FIND_LIMIT = 100;
     private static final String GET_ANALYZE = "/analyse/get";
     private static final String GET_ACCOUNT_ID = "/user/account/id";
     private static final String UPLOAD_DIR = "/upload";
@@ -75,7 +75,6 @@ public class Bootstrap {
     private ScheduledExecutorService ttlExecutor = Executors.newSingleThreadScheduledExecutor();
     private ExecutorService listenerExecutor = Executors.newSingleThreadExecutor();
     private ExecutorService uploadExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 4);
-    private JsonNode analyze;
     private volatile S3ResourceManager s3ResourceManager;
 
     public void run() throws Exception {
@@ -169,8 +168,12 @@ public class Bootstrap {
                                         try {
                                             S3ResourceManager rm = s3ResourceManager;
                                             if (rm != null) {
-                                                LOG.debug("Uploading {}", f.getName());
-                                                rm.upload(f);
+                                                if (!isTimestampedOnly(f)) {
+                                                    LOG.debug("Uploading {}", f.getName());
+                                                    rm.upload(f);
+                                                } else {
+                                                    LOG.error("ERROR: Log File doesn't contain datestamps, can't process it. Consider using -XX:+PrintGCDateStamps flag.");
+                                                }
                                                 zero(f);
                                             } else {
                                                 LOG.debug("Not uploading {}", f.getName());
@@ -219,6 +222,23 @@ public class Bootstrap {
         }, 30, 30, TimeUnit.MINUTES);
     }
 
+    private boolean isTimestampedOnly(File f) throws Exception {
+        try (InputStream is = new GZIPInputStream(new FileInputStream(f))) {
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
+                int count = 0;
+
+                String str;
+                while (count <= TIMESTAMP_FIND_LIMIT && (str = br.readLine()) != null) {
+                    count++;
+                    if (str.matches(TIMESTAMP_PATTERN)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private void checkAndScheduleForUpload(File f) {
         try {
             String hex;
@@ -263,7 +283,7 @@ public class Bootstrap {
         return f.getName().contains(extension) &&
                 (f.getName().endsWith(extension)
                         || f.getName().endsWith(extension + ".gz")
-                        || f.getName().matches("^.*\\.\\d(\\.gz)?$"));
+                        || f.getName().matches(ROLL_LOG_EXTENSION_PATTERN));
     }
 
 
@@ -273,7 +293,7 @@ public class Bootstrap {
 
     private void loadAnalyze() throws Exception {
         String accountId = call(GET_ACCOUNT_ID, Collections.<String, String>emptyMap()).asText();
-        analyze = call(GET_ANALYZE, Collections.singletonMap("id", analyzeId));
+        JsonNode analyze = call(GET_ANALYZE, Collections.singletonMap("id", analyzeId));
         LOG.debug("Account - {}", accountId);
         LOG.debug("Analyze - {}", analyze);
         if (analyze.has("id")) {
