@@ -6,6 +6,7 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
@@ -44,16 +45,16 @@ public class Bootstrap {
     private static final String GET_ACCOUNT_ID = "/user/account/id";
     private static final String UPLOAD_DIR = "/upload";
 
-    @Parameter(names = { "-logs_dir" }, required = true, validateValueWith = DirectoryValidator.class, description = "Directory where log files are located")
-    private String logsDir;
+    @Parameter(names = { "-logs_dirs" }, required = true, validateValueWith = DirectoryValidator.class, description = "Directory where log files are located")
+    private String logsDirsStr;
     @Parameter(names = { "-gcp_host" }, required = true, validateValueWith = EmptyStringValidator.class, description = "GCPlot API host address")
     private String gcpHost;
     @Parameter(names = { "-data_dir" }, required = true, validateValueWith = DirectoryValidator.class, description = "Connector data directory")
     private String dataDir;
     @Parameter(names = { "-analyze_group" }, validateValueWith = EmptyStringValidator.class, required = true, description = "Analyze Group ID")
     private String analyzeId;
-    @Parameter(names = { "-jvm_id" }, required = true, validateValueWith = EmptyStringValidator.class, description = "JVM ID")
-    private String jvmId;
+    @Parameter(names = { "-jvm_ids" }, required = true, validateValueWith = EmptyStringValidator.class, description = "JVM ID")
+    private String jvmIdsStr;
     @Parameter(names = { "-token" }, required = true, validateValueWith = EmptyStringValidator.class, description = "Token in GCPlot platform")
     private String token;
     @Parameter(names = { "-https" }, description = "Whether to use secure connections.")
@@ -73,7 +74,7 @@ public class Bootstrap {
     private ScheduledExecutorService configurationReloader = Executors.newSingleThreadScheduledExecutor();
     private ScheduledExecutorService conductorExecutor = Executors.newSingleThreadScheduledExecutor();
     private ScheduledExecutorService ttlExecutor = Executors.newSingleThreadScheduledExecutor();
-    private ExecutorService listenerExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService listenerExecutor;
     private ExecutorService uploadExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 4);
     private volatile S3ResourceManager s3ResourceManager;
 
@@ -88,6 +89,13 @@ public class Bootstrap {
             new File(dataDir + UPLOAD_DIR).mkdir();
         }
         loadAnalyze();
+        final List<String> jvmIds = Splitter.on(",").splitToList(jvmIdsStr);
+        final List<String> logsDirs = Splitter.on(",").splitToList(logsDirsStr);
+        if (logsDirs.size() < jvmIds.size()) {
+            throw new IllegalArgumentException(String.format("JVM ids [%s] and Logs Dirs [%s] mismatch! Aborting.",
+                    jvmIdsStr, logsDirsStr));
+        }
+        listenerExecutor = Executors.newFixedThreadPool(jvmIds.size());
         configurationReloader.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
@@ -101,122 +109,138 @@ public class Bootstrap {
                 }
             }
         }, reloadConfigMs, reloadConfigMs, TimeUnit.MILLISECONDS);
-        listenerExecutor.submit(new Runnable() {
-            @Override
-            public void run() {
-                LOG.info("Starting directory watcher daemon.");
-                try {
-                    WatchService watcher = FileSystems.getDefault().newWatchService();
-                    Path dir = Paths.get(logsDir);
-                    LOG.debug("Registering watcher on {}", dir);
-                    dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
+        for (int i = 0; i < jvmIds.size(); i++) {
+            final String jvmId = jvmIds.get(i);
+            final String logsDir = logsDirs.get(i);
+            listenerExecutor.submit(new Runnable() {
+                @Override
+                public void run() {
+                    LOG.info("Starting directory [{}] watcher daemon for JVM [{}].", logsDir, jvmId);
+                    try {
+                        WatchService watcher = FileSystems.getDefault().newWatchService();
+                        Path dir = Paths.get(logsDir);
+                        LOG.debug("Registering watcher on {}", dir);
+                        dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
 
-                    while (true) {
-                        WatchKey key = watcher.take();
+                        while (true) {
+                            WatchKey key = watcher.take();
 
-                        for (WatchEvent<?> event : key.pollEvents()) {
-                            WatchEvent.Kind<?> kind = event.kind();
-                            if (kind == OVERFLOW || kind == ENTRY_DELETE) {
-                                continue;
-                            }
-                            WatchEvent<Path> ev = (WatchEvent<Path>) event;
-                            File f = ev.context().toFile();
-                            LOG.debug("Directory Watcher: Received notify about '{}' with kind {}", f.getName(), kind.name());
-
-                            try {
-                                if (!extensionMatches(f)) {
-                                    LOG.debug("Directory Watcher: Extension doesn't match for {}", f.getName());
+                            for (WatchEvent<?> event : key.pollEvents()) {
+                                WatchEvent.Kind<?> kind = event.kind();
+                                if (kind == OVERFLOW || kind == ENTRY_DELETE) {
+                                    continue;
                                 }
-                                syncFiles(f);
-                            } catch (Throwable t) {
-                                LOG.error(t.getMessage(), t);
+                                WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                                File f = ev.context().toFile();
+                                LOG.debug("Directory Watcher: Received notify about '{}' with kind {}", f.getName(), kind.name());
+
+                                try {
+                                    if (!extensionMatches(f)) {
+                                        LOG.debug("Directory Watcher: Extension doesn't match for {}", f.getName());
+                                    }
+                                    syncFiles(f, logsDir, jvmId);
+                                } catch (Throwable t) {
+                                    LOG.error(t.getMessage(), t);
+                                }
+                            }
+
+                            boolean valid = key.reset();
+                            if (!valid) {
+                                break;
                             }
                         }
-
-                        boolean valid = key.reset();
-                        if (!valid) {
-                            break;
-                        }
+                    } catch (Throwable t) {
+                        LOG.error(t.getMessage(), t);
+                    } finally {
+                        LOG.info("Stopping directory watcher daemon.");
                     }
-                } catch (Throwable t) {
-                    LOG.error(t.getMessage(), t);
-                } finally {
-                    LOG.info("Stopping directory watcher daemon.");
                 }
-            }
-        });
+            });
+        }
         conductorExecutor.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
                 LOG.debug("Conductor process started.");
-                try {
-                    List<File> files =
-                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
-                    for (final File f : files) {
-                        LOG.debug("Conductor: Checking {}", f.getName());
-                        try {
-                            if (f.getName().endsWith(".progress")) {
-                                continue;
-                            }
-                            final File inProgress = new File(f.getParent(), f.getName() + ".progress");
-                            if (f.length() > 0 && !inProgress.exists()) {
-                                inProgress.createNewFile();
-
-                                uploadExecutor.submit(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        try {
-                                            S3ResourceManager rm = s3ResourceManager;
-                                            if (rm != null) {
-                                                if (!isTimestampedOnly(f)) {
-                                                    LOG.debug("Uploading {}", f.getName());
-                                                    rm.upload(f);
-                                                } else {
-                                                    LOG.error("ERROR: Log File doesn't contain datestamps, can't process it. Consider using -XX:+PrintGCDateStamps flag.");
-                                                }
-                                                zero(f);
-                                            } else {
-                                                LOG.debug("Not uploading {}", f.getName());
-                                                zero(f);
-                                            }
-                                            FileUtils.deleteQuietly(inProgress);
-                                        } catch (Throwable t) {
-                                            LOG.error(t.getMessage(), t);
-                                        }
-                                    }
-                                });
-                            }
-                        } catch (Throwable t) {
-                            LOG.error(t.getMessage(), t);
+                for (int i = 0; i < jvmIds.size(); i++) {
+                    try {
+                        final String jvmId = jvmIds.get(i);
+                        File target = new File(dataDir + UPLOAD_DIR + "/" + jvmId);
+                        if (!target.exists()) {
+                            target.mkdirs();
                         }
+                        List<File> files = new ArrayList<>(FileUtils.listFiles(target, null, false));
+                        for (final File f : files) {
+                            LOG.debug("Conductor {}: Checking {}", jvmId, f.getName());
+                            try {
+                                if (f.getName().endsWith(".progress")) {
+                                    continue;
+                                }
+                                final File inProgress = new File(f.getParent(), f.getName() + ".progress");
+                                if (f.length() > 0 && !inProgress.exists()) {
+                                    inProgress.createNewFile();
+
+                                    uploadExecutor.submit(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            try {
+                                                S3ResourceManager rm = s3ResourceManager;
+                                                if (rm != null) {
+                                                    if (!isTimestampedOnly(f)) {
+                                                        LOG.debug("Uploading {}: {}", jvmId, f.getName());
+                                                        rm.upload(f, jvmId);
+                                                    } else {
+                                                        LOG.error("Conductor ERROR: Log File {} doesn't contain datestamps," +
+                                                                " can't process it. Consider using -XX:+PrintGCDateStamps flag.", f.getName());
+                                                    }
+                                                    zero(f);
+                                                } else {
+                                                    LOG.debug("Not uploading {}: {}", jvmId, f.getName());
+                                                    zero(f);
+                                                }
+                                                FileUtils.deleteQuietly(inProgress);
+                                            } catch (Throwable t) {
+                                                LOG.error(t.getMessage(), t);
+                                            }
+                                        }
+                                    });
+                                }
+                            } catch (Throwable t) {
+                                LOG.error(t.getMessage(), t);
+                            }
+                        }
+                    } catch (Throwable t) {
+                        LOG.error(t.getMessage(), t);
+                    } finally {
+                        LOG.debug("Conductor process finished.");
                     }
-                } catch (Throwable t) {
-                    LOG.error(t.getMessage(), t);
-                } finally {
-                    LOG.debug("Conductor process finished.");
                 }
             }
         }, filesSyncMs, filesSyncMs, TimeUnit.MILLISECONDS);
         ttlExecutor.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
-                try {
-                    LOG.debug("TTL process started.");
-                    List<File> files =
-                            new ArrayList<>(FileUtils.listFiles(new File(dataDir + UPLOAD_DIR), null, false));
-                    for (File f : files) {
-                        if (f.length() == 0 && !f.getName().endsWith(".progress")) {
-                            long lm = f.lastModified();
-                            if (lm > 0 && System.currentTimeMillis() - lm > ttl) {
-                                LOG.debug("TTL: deleting {}", f);
-                                FileUtils.deleteQuietly(f);
+                for (String jvmId : jvmIds) {
+                    try {
+                        LOG.debug("TTL process started.");
+                        File target = new File(dataDir + UPLOAD_DIR + "/" + jvmId);
+                        if (!target.exists()) {
+                            target.mkdirs();
+                        }
+                        List<File> files = new ArrayList<>(FileUtils.listFiles(target, null, false));
+                        for (File f : files) {
+                            if (f.length() == 0 && !f.getName().endsWith(".progress")) {
+                                long lm = f.lastModified();
+                                if (lm > 0 && System.currentTimeMillis() - lm > ttl) {
+                                    LOG.debug("TTL: deleting {}", f);
+                                    FileUtils.deleteQuietly(f);
+                                }
                             }
                         }
+                    } catch (Throwable t) {
+                        LOG.error(t.getMessage(), t);
+                    } finally {
+                        LOG.debug("TTL process finished.");
                     }
-                } catch (Throwable t) {
-                    LOG.error(t.getMessage(), t);
-                } finally {
-                    LOG.debug("TTL process finished.");
                 }
             }
         }, 30, 30, TimeUnit.MINUTES);
@@ -239,7 +263,7 @@ public class Bootstrap {
         return false;
     }
 
-    private void checkAndScheduleForUpload(File f) {
+    private void checkAndScheduleForUpload(File f, String jvmId) {
         try {
             String hex;
             try (FileInputStream fis = new FileInputStream(f)) {
@@ -250,7 +274,11 @@ public class Bootstrap {
                 }
             }
             String fileName = hex + ".log.gz";
-            File target = new File(dataDir + UPLOAD_DIR, fileName);
+            String dr = dataDir + UPLOAD_DIR + "/" + jvmId;
+            if (!new File(dr).exists()) {
+                new File(dr).mkdirs();
+            }
+            File target = new File(dr, fileName);
             if (!target.exists()) {
                 LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
                 try (GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target))) {
@@ -270,11 +298,11 @@ public class Bootstrap {
         }
     }
 
-    private void syncFiles(File f) throws IOException {
+    private void syncFiles(File f, String logsDir, String jvmId) throws IOException {
         for (File file : new ArrayList<>(FileUtils.listFiles(new File(logsDir), null, false))) {
             if (!file.getName().equals(f.getName()) && extensionMatches(file)) {
                 LOG.debug("Checking {} for possible sync.", file.getName());
-                checkAndScheduleForUpload(file);
+                checkAndScheduleForUpload(file, jvmId);
             }
         }
     }
@@ -339,7 +367,7 @@ public class Bootstrap {
             throw new RuntimeException("Unknown Source Type = " + sourceType);
         }
         connector.init();
-        this.s3ResourceManager = new S3ResourceManager(connector, basePath, accountId, analyzeId, jvmId);
+        this.s3ResourceManager = new S3ResourceManager(connector, basePath, accountId, analyzeId);
     }
 
     private String normPath(String basePath) {

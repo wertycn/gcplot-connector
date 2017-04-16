@@ -6,17 +6,18 @@
 #
 ###################################
 
-## Directory with the Garbage Collector log files
-export LOGS_DIR=
-
 ## Account token value
 export ACCOUNT_TOKEN=
 
 ## Analyze Group ID
 export ANALYZE_GROUP_ID=
 
-## JVM ID
-export JVM_ID=
+## Comma-separated list of JVM ID(s)
+export JVM_IDS=
+
+## Comma-separated directories with the GC log files, one per each JVM
+## Warning! The directories must be provided in the same order as JVM_IDS
+export LOGS_DIR=
 
 ###################################
 

@@ -16,18 +16,15 @@ public class S3ResourceManager {
     private final String basePath;
     private final String accountId;
     private final String analyzeId;
-    private final String jvmId;
 
-    public S3ResourceManager(S3Connector connector, String basePath, String accountId, String analyzeId,
-                             String jvmId) {
+    public S3ResourceManager(S3Connector connector, String basePath, String accountId, String analyzeId) {
         this.connector = connector;
         this.basePath = basePath;
         this.accountId = accountId;
         this.analyzeId = analyzeId;
-        this.jvmId = jvmId;
     }
 
-    public void upload(File file) {
+    public void upload(File file, String jvmId) {
         List<PartETag> partETags = new ArrayList<>();
 
         String newPath = Utils.toBase64(accountId) + "/" + analyzeId + "/" + jvmId;
