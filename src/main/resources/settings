@@ -17,7 +17,7 @@ export JVM_IDS=
 
 ## Comma-separated directories with the GC log files, one per each JVM
 ## Warning! The directories must be provided in the same order as JVM_IDS
-export LOGS_DIR=
+export LOGS_DIRS=
 
 ###################################
 
