@@ -11,6 +11,8 @@ import com.google.common.base.Strings;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.vfs2.*;
+import org.apache.commons.vfs2.impl.DefaultFileMonitor;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
@@ -21,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.file.*;
+import java.nio.file.FileSystemException;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -117,23 +120,28 @@ public class Bootstrap {
                 public void run() {
                     LOG.info("Starting directory [{}] watcher daemon for JVM [{}].", logsDir, jvmId);
                     try {
-                        WatchService watcher = FileSystems.getDefault().newWatchService();
-                        Path dir = Paths.get(logsDir);
-                        LOG.debug("Registering watcher on {}", dir);
-                        dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
+                        LOG.debug("Registering watcher on {}", logsDir);
+                        FileSystemManager fsManager = VFS.getManager();
+                        FileObject listendir = fsManager.resolveFile(logsDir);
+                        DefaultFileMonitor fm = new DefaultFileMonitor(new FileListener() {
+                            @Override
+                            public void fileCreated(FileChangeEvent event) throws Exception {
+                                LOG.debug("Directory Watcher: Received notify about '{}' with kind ENTRY_CREATE", event.getFile().getName().getBaseName());
+                                process(new File(event.getFile().getName().getPath()));
+                            }
 
-                        while (true) {
-                            WatchKey key = watcher.take();
+                            @Override
+                            public void fileDeleted(FileChangeEvent event) throws Exception {
+                                // just ignore
+                            }
 
-                            for (WatchEvent<?> event : key.pollEvents()) {
-                                WatchEvent.Kind<?> kind = event.kind();
-                                if (kind == OVERFLOW || kind == ENTRY_DELETE) {
-                                    continue;
-                                }
-                                WatchEvent<Path> ev = (WatchEvent<Path>) event;
-                                File f = ev.context().toFile();
-                                LOG.debug("Directory Watcher: Received notify about '{}' with kind {}", f.getName(), kind.name());
+                            @Override
+                            public void fileChanged(FileChangeEvent event) throws Exception {
+                                LOG.debug("Directory Watcher: Received notify about '{}' with kind ENTRY_MODIFY", event.getFile().getName().getBaseName());
+                                process(new File(event.getFile().getName().getPath()));
+                            }
 
+                            private void process(File f) {
                                 try {
                                     if (!extensionMatches(f)) {
                                         LOG.debug("Directory Watcher: Extension doesn't match for {}", f.getName());
@@ -143,12 +151,11 @@ public class Bootstrap {
                                     LOG.error(t.getMessage(), t);
                                 }
                             }
-
-                            boolean valid = key.reset();
-                            if (!valid) {
-                                break;
-                            }
-                        }
+                        });
+                        fm.setRecursive(true);
+                        fm.addFile(listendir);
+                        fm.start();
+                        Thread.sleep(Long.MAX_VALUE);
                     } catch (Throwable t) {
                         LOG.error(t.getMessage(), t);
                     } finally {
@@ -168,7 +175,7 @@ public class Bootstrap {
                         if (!target.exists()) {
                             target.mkdirs();
                         }
-                        List<File> files = new ArrayList<>(FileUtils.listFiles(target, null, false));
+                        List<File> files = new ArrayList<File>(FileUtils.listFiles(target, null, false));
                         for (final File f : files) {
                             LOG.debug("Conductor {}: Checking {}", jvmId, f.getName());
                             try {
@@ -226,7 +233,7 @@ public class Bootstrap {
                         if (!target.exists()) {
                             target.mkdirs();
                         }
-                        List<File> files = new ArrayList<>(FileUtils.listFiles(target, null, false));
+                        List<File> files = new ArrayList<File>(FileUtils.listFiles(target, null, false));
                         for (File f : files) {
                             if (f.length() == 0 && !f.getName().endsWith(".progress")) {
                                 long lm = f.lastModified();
@@ -247,8 +254,10 @@ public class Bootstrap {
     }
 
     private boolean isTimestampedOnly(File f) throws Exception {
-        try (InputStream is = new GZIPInputStream(new FileInputStream(f))) {
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
+        InputStream is = new GZIPInputStream(new FileInputStream(f));
+        try {
+            BufferedReader br = new BufferedReader(new InputStreamReader(is));
+            try {
                 int count = 0;
 
                 String str;
@@ -258,7 +267,11 @@ public class Bootstrap {
                         return true;
                     }
                 }
+            } finally {
+                br.close();
             }
+        } finally {
+            is.close();
         }
         return false;
     }
@@ -266,12 +279,15 @@ public class Bootstrap {
     private void checkAndScheduleForUpload(File f, String jvmId) {
         try {
             String hex;
-            try (FileInputStream fis = new FileInputStream(f)) {
+            FileInputStream fis = new FileInputStream(f);
+            try {
                 if (isGzipped(f)) {
                     hex = DigestUtils.sha1Hex(new GZIPInputStream(fis));
                 } else {
                     hex = DigestUtils.sha1Hex(fis);
                 }
+            } finally {
+                fis.close();
             }
             String fileName = hex + ".log.gz";
             String dr = dataDir + UPLOAD_DIR + "/" + jvmId;
@@ -281,14 +297,20 @@ public class Bootstrap {
             File target = new File(dr, fileName);
             if (!target.exists()) {
                 LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
-                try (GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target))) {
+                GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target));
+                try {
                     if (isGzipped(f)) {
-                        try (GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(f))) {
+                        GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(f));
+                        try {
                             IOUtils.copy(gzip, gos);
+                        } finally {
+                            gzip.close();
                         }
                     } else {
                         FileUtils.copyFile(f, gos);
                     }
+                } finally {
+                    gos.close();
                 }
             } else {
                 LOG.debug("File Sync: {} already exists.", fileName);
@@ -299,7 +321,7 @@ public class Bootstrap {
     }
 
     private void syncFiles(File f, String logsDir, String jvmId) throws IOException {
-        for (File file : new ArrayList<>(FileUtils.listFiles(new File(logsDir), null, false))) {
+        for (File file : new ArrayList<File>(FileUtils.listFiles(new File(logsDir), null, false))) {
             if (!file.getName().equals(f.getName()) && extensionMatches(file)) {
                 LOG.debug("Checking {} for possible sync.", file.getName());
                 checkAndScheduleForUpload(file, jvmId);
@@ -404,7 +426,7 @@ public class Bootstrap {
     private void zero(File file) {
         try {
             LOG.debug("Zeroing {}", file.getName());
-            Files.newOutputStream(file.toPath(), StandardOpenOption.TRUNCATE_EXISTING).close();
+            FileUtils.write(file, "", "UTF-8");
         } catch (IOException ignored) {
         }
     }

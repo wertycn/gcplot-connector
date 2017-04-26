@@ -13,7 +13,7 @@ public enum SourceType {
     private static final Map<String, SourceType> VALUES;
 
     static {
-        HashMap<String, SourceType> values = new HashMap<>();
+        HashMap<String, SourceType> values = new HashMap<String, SourceType>();
         for (SourceType st : values()) {
             values.put(st.getUrn(), st);
         }

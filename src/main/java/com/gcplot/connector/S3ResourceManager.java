@@ -5,8 +5,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,20 +23,12 @@ public class S3ResourceManager {
     }
 
     public void upload(File file, String jvmId) {
-        List<PartETag> partETags = new ArrayList<>();
+        List<PartETag> partETags = new ArrayList<PartETag>();
 
         String newPath = Utils.toBase64(accountId) + "/" + analyzeId + "/" + jvmId;
         newPath = (basePath.length() > 0 ? basePath : "") + newPath + "/" + file.getName();
         // Step 1: Initialize.
         ObjectMetadata om = new ObjectMetadata();
-        String contentType = null;
-        try {
-            contentType = Files.probeContentType(file.toPath());
-        } catch (IOException ignored) {
-        }
-        if (contentType != null) {
-            om.addUserMetadata("Content-Type", contentType);
-        }
         InitiateMultipartUploadRequest initRequest;
         InitiateMultipartUploadResult initResponse = null;
 

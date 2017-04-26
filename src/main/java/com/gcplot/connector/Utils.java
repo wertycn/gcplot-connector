@@ -40,7 +40,7 @@ public abstract class Utils {
     public static Port[] getFreePorts(int portNumber) {
         try {
             Port[] result = new Port[portNumber];
-            List<ServerSocket> servers = new ArrayList<>(portNumber);
+            List<ServerSocket> servers = new ArrayList<ServerSocket>(portNumber);
             try {
                 for (int i = 0; i < portNumber; i++) {
                     ServerSocket tempServer = new ServerSocket(0);
