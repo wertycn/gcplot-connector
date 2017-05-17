@@ -48,7 +48,7 @@ public class Bootstrap {
     private static final String GET_ACCOUNT_ID = "/user/account/id";
     private static final String UPLOAD_DIR = "/upload";
 
-    @Parameter(names = { "-logs_dirs" }, required = true, validateValueWith = DirectoryValidator.class, description = "Directory where log files are located")
+    @Parameter(names = { "-logs_dirs" }, required = true, description = "Directory where log files are located")
     private String logsDirsStr;
     @Parameter(names = { "-gcp_host" }, required = true, validateValueWith = EmptyStringValidator.class, description = "GCPlot API host address")
     private String gcpHost;
