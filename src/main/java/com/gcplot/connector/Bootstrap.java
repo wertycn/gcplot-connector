@@ -309,7 +309,7 @@ public class Bootstrap {
                         } else {
                             FileUtils.copyFile(f, gos);
                         }
-                        lastModifiedCache.put(f.getName(), lastModified);
+                        lastModifiedCache.put(f.getName(), fileLastModified);
                     } finally {
                         gos.close();
                     }
