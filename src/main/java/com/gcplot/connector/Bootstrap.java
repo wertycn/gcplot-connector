@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
@@ -22,17 +24,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.nio.file.*;
-import java.nio.file.FileSystemException;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
-
-import static java.nio.file.StandardWatchEventKinds.*;
 
 /**
  * @author <a href="mailto:art.dm.ser@gmail.com">Artem Dmitriev</a>
@@ -79,6 +74,7 @@ public class Bootstrap {
     private ScheduledExecutorService ttlExecutor = Executors.newSingleThreadScheduledExecutor();
     private ExecutorService listenerExecutor;
     private ExecutorService uploadExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 4);
+    private Cache<String, Long> lastModifiedCache = CacheBuilder.newBuilder().maximumSize(10000).build();
     private volatile S3ResourceManager s3ResourceManager;
 
     public void run() throws Exception {
@@ -102,13 +98,13 @@ public class Bootstrap {
         configurationReloader.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
-                LOG.info("Reloading configuration started.");
+                LOG.debug("Reloading configuration started.");
                 try {
                     loadAnalyze();
                 } catch (Throwable t) {
                     LOG.error(t.getMessage(), t);
                 } finally {
-                    LOG.info("Reloading configuration completed.");
+                    LOG.debug("Reloading configuration completed.");
                 }
             }
         }, reloadConfigMs, reloadConfigMs, TimeUnit.MILLISECONDS);
@@ -141,7 +137,7 @@ public class Bootstrap {
                                 process(new File(event.getFile().getName().getPath()));
                             }
 
-                            private void process(File f) {
+                            private synchronized void process(File f) {
                                 try {
                                     if (!extensionMatches(f)) {
                                         LOG.debug("Directory Watcher: Extension doesn't match for {}", f.getName());
@@ -276,44 +272,52 @@ public class Bootstrap {
         return false;
     }
 
-    private void checkAndScheduleForUpload(File f, String jvmId) {
+    private void checkAndScheduleForUpload(final File f, String jvmId) {
         try {
-            String hex;
-            FileInputStream fis = new FileInputStream(f);
-            try {
-                if (isGzipped(f)) {
-                    hex = DigestUtils.sha1Hex(new GZIPInputStream(fis));
-                } else {
-                    hex = DigestUtils.sha1Hex(fis);
-                }
-            } finally {
-                fis.close();
-            }
-            String fileName = hex + ".log.gz";
-            String dr = dataDir + UPLOAD_DIR + "/" + jvmId;
-            if (!new File(dr).exists()) {
-                new File(dr).mkdirs();
-            }
-            File target = new File(dr, fileName);
-            if (!target.exists()) {
-                LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
-                GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target));
+            Long lastModified = lastModifiedCache.getIfPresent(f.getName());
+            long fileLastModified = f.lastModified();
+            if (lastModified == null || lastModified == 0 || fileLastModified == 0
+                    || lastModified != fileLastModified) {
+                String hex;
+                FileInputStream fis = new FileInputStream(f);
                 try {
                     if (isGzipped(f)) {
-                        GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(f));
-                        try {
-                            IOUtils.copy(gzip, gos);
-                        } finally {
-                            gzip.close();
-                        }
+                        hex = DigestUtils.sha1Hex(new GZIPInputStream(fis));
                     } else {
-                        FileUtils.copyFile(f, gos);
+                        hex = DigestUtils.sha1Hex(fis);
                     }
                 } finally {
-                    gos.close();
+                    fis.close();
+                }
+                String fileName = hex + ".log.gz";
+                String dr = dataDir + UPLOAD_DIR + "/" + jvmId;
+                if (!new File(dr).exists()) {
+                    new File(dr).mkdirs();
+                }
+                File target = new File(dr, fileName);
+                if (!target.exists()) {
+                    LOG.debug("File Sync: Copying {} to {}", f.getName(), fileName);
+                    GZIPOutputStream gos = new GZIPOutputStream(new FileOutputStream(target));
+                    try {
+                        if (isGzipped(f)) {
+                            GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(f));
+                            try {
+                                IOUtils.copy(gzip, gos);
+                            } finally {
+                                gzip.close();
+                            }
+                        } else {
+                            FileUtils.copyFile(f, gos);
+                        }
+                        lastModifiedCache.put(f.getName(), lastModified);
+                    } finally {
+                        gos.close();
+                    }
+                } else {
+                    LOG.debug("File Sync: {} already exists.", fileName);
                 }
             } else {
-                LOG.debug("File Sync: {} already exists.", fileName);
+                LOG.debug("Skipping {}, as its lastModified didn't changed.");
             }
         } catch (Throwable t) {
             LOG.error(t.getMessage(), t);
