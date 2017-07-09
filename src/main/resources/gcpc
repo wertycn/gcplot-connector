@@ -49,6 +49,14 @@ function start_service() {
     echo "$JAVA_CMD $JAVA_PROC_ARGS -Dlogback.configurationFile=$LOGBACK_PATH_NAME -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS"
   fi
 
+  if [ -f $PID_PATH_NAME ]; then
+    PID=`cat $PID_PATH_NAME`
+    NUMS=`ps -p $PID | sort | uniq | wc -l`
+    if [ "$NUMS" != "2" ]; then
+      su $GCP_USER -c "rm -rf $PID_PATH_NAME"
+    fi
+  fi
+
   if [ ! -f $PID_PATH_NAME ]; then
     su $GCP_USER -c "nohup $JAVA_CMD $JAVA_PROC_ARGS -Dlogback.configurationFile=$LOGBACK_PATH_NAME -jar $GCP_DIRECTORY/lib/bs.jar $PARAMS >> /dev/null & echo \$! > $PID_PATH_NAME"
     sleep 5
