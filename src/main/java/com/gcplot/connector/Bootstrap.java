@@ -309,15 +309,15 @@ public class Bootstrap {
                         } else {
                             FileUtils.copyFile(f, gos);
                         }
-                        lastModifiedCache.put(f.getName(), fileLastModified);
                     } finally {
                         gos.close();
                     }
                 } else {
-                    LOG.debug("File Sync: {} already exists.", fileName);
+                    LOG.debug("File Sync: {} already exists, {}.", fileName, fileLastModified);
                 }
+                lastModifiedCache.put(f.getName(), fileLastModified);
             } else {
-                LOG.debug("Skipping {}, as its lastModified didn't changed.");
+                LOG.debug("Skipping {}, as its [lastModified={}] didn't changed.", f.getName(), fileLastModified);
             }
         } catch (Throwable t) {
             LOG.error(t.getMessage(), t);
