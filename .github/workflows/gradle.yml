@@ -32,3 +32,10 @@ jobs:
       uses: gradle/gradle-build-action@0d13054264b0bb894ded474f08ebb30921341cee
       with:
         arguments: build
+    - run: ls 
+    - run: ls -la build
+    - run: ls 
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: Release.txt    
