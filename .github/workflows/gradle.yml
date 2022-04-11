@@ -38,7 +38,7 @@ jobs:
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        token: ${{ githu.TOKEN }}
+        token: ${{ github.TOKEN }}
         body: "release package"
         tag_name: V1.0.0
         name: 1.0.0
