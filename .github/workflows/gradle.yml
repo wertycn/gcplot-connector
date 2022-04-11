@@ -39,8 +39,11 @@ jobs:
     - run: ls 
     - name: Release
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
       with:
+        token: ${{ githu.TOKEN }}
+        body: "release package"
+        tag_name: V1.0.0
+        name: 1.0.0
         files: |
           build/distributions/gcplot-connector.zip    
           build/distributions/gcplot-connector.tar    
