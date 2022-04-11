@@ -33,7 +33,7 @@ jobs:
       with:
         arguments: build
     - run: ls 
-    - run: ls -la build
+    - run: ls -la build/distributions
     - run: ls 
     - name: Release
       uses: softprops/action-gh-release@v1
