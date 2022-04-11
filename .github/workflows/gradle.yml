@@ -38,4 +38,6 @@ jobs:
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        files: Release.txt    
+        files: |
+          build/distributions/gcplot-connector.zip    
+          build/distributions/gcplot-connector.tar    
