@@ -14,7 +14,7 @@ on:
     branches: [ master ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -38,7 +38,6 @@ jobs:
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
-        token: ${{ github.TOKEN }}
         body: "release package"
         tag_name: V1.0.0
         name: 1.0.0
